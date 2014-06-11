@@ -1,1 +1,0 @@
-rvm gemset use mongoid_paperclip_queue --create
