@@ -32,6 +32,7 @@ module Mongoid::PaperclipQueue
           klass = parent.send(klass.to_sym)
           if klass
             klass.do_reprocessing_on field
+            klass.send("stop_#{field}_processing")
           end
         end
       rescue
@@ -114,8 +115,17 @@ module Mongoid::PaperclipQueue
         true
       end
 
+      define_method "stop_#{field}_processing!" do
+        @stop_processing = true
+      end      
+
+      self.send :before_save do 
+        Mongoid.logger.warn "Before #{self.img_fingerprint} and dirty? #{self.send("#{field}_fingerprint_changed?".to_sym).to_s}"
+      end
+
       self.send :after_save do
-        if self.send("#{field}_fingerprint_changed?".to_sym)
+        Mongoid.logger.warn "After #{self.img_fingerprint} and dirty? #{self.send("#{field}_fingerprint_changed?".to_sym).to_s}"
+        if self.send("#{field}_fingerprint_changed?".to_sym && !@stop_processing)
           # add a Redis key for the application to check if we're still processing
           # we don't need it for the processing, it's just a helpful tool
           Mongoid::PaperclipQueue::Redis.server.sadd(self.class.name, "#{field}:#{self.id.to_s}")
