@@ -104,6 +104,7 @@ module Mongoid::PaperclipQueue
     field(:"#{field}_file_size", :type => Integer)
     field(:"#{field}_updated_at", :type => DateTime)
     field(:"#{field}_fingerprint", :type => String)
+    field(:"#{field}_post_processed_complete", :type => Boolean)    
   end
 
   def has_queued_mongoid_attached_file(field, options = {})
@@ -117,6 +118,7 @@ module Mongoid::PaperclipQueue
 
       define_method "stop_#{field}_processing!" do
         @stop_processing = true
+        self.send :"#{field}_post_processed_complete", true
       end      
 
       self.send :before_save do 
