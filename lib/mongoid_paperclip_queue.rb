@@ -32,16 +32,16 @@ module Mongoid::PaperclipQueue
           klass = parent.send(klass.to_sym)
           if klass
             klass.do_reprocessing_on field
-            klass.send("stop_#{field}_processing")
           end
         end
-      rescue
+      rescue => msg
         if retries <= max_retries
           max_retries += 1
           sleep 2
           retry
         else
-          raise
+          Mongoid.logger.warn "ERRRORORORROORROR: #{msg.to_s}"
+          raise msg
         end
       end
 
@@ -104,7 +104,7 @@ module Mongoid::PaperclipQueue
     field(:"#{field}_file_size", :type => Integer)
     field(:"#{field}_updated_at", :type => DateTime)
     field(:"#{field}_fingerprint", :type => String)
-    field(:"#{field}_post_processed_complete", :type => Boolean)    
+    field(:"#{field}_post_process_complete", :type => Boolean)    
   end
 
   def has_queued_mongoid_attached_file(field, options = {})
@@ -116,18 +116,19 @@ module Mongoid::PaperclipQueue
         true
       end
 
-      define_method "stop_#{field}_processing!" do
+      define_method "stop_#{field}_processing!" do |field|
         @stop_processing = true
-        self.send :"#{field}_post_processed_complete", true
+        # self.class.skip_callback(:save, :before)
+        self.send :"update_attribute", "#{field}_post_process_complete", true
+        # self.class.set_callback(:save, :before)
       end      
 
-      self.send :before_save do 
-        Mongoid.logger.warn "Before #{self.img_fingerprint} and dirty? #{self.send("#{field}_fingerprint_changed?".to_sym).to_s}"
-      end
+      # self.send :before_save do 
+      #   Mongoid.logger.warn "Before #{self.img_fingerprint} and dirty? #{self.send("#{field}_fingerprint_changed?".to_sym).to_s}"
+      # end
 
       self.send :after_save do
-        Mongoid.logger.warn "After #{self.img_fingerprint} and dirty? #{self.send("#{field}_fingerprint_changed?".to_sym).to_s}"
-        if self.send("#{field}_fingerprint_changed?".to_sym && !@stop_processing)
+        if !self.send(:"#{field}_post_process_complete")
           # add a Redis key for the application to check if we're still processing
           # we don't need it for the processing, it's just a helpful tool
           Mongoid::PaperclipQueue::Redis.server.sadd(self.class.name, "#{field}:#{self.id.to_s}")
@@ -170,7 +171,12 @@ module Mongoid::PaperclipQueue
 
     def do_reprocessing_on(field)
       @is_processing=true
-      self.send(field.to_sym).reprocess!
+      if !self.send(:"#{field}_post_process_complete")
+        self.send(field.to_sym).reprocess!
+        self.send(:"stop_#{field}_processing!",field)
+        self.send(:"#{field}_post_process")
+        self.send(:save)
+      end
       Mongoid::PaperclipQueue::Redis.server.srem(self.class.name, "#{field}:#{self.id.to_s}")
     end
 
